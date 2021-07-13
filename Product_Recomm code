@@ -1,0 +1,73 @@
+library(data.table)
+library(tidyverse)            
+library(knitr)
+library(recommenderlab)
+
+# reading the dataset
+retail <-  read.csv("your_data.csv")
+head(retail)
+
+# Removing duplicates 
+retail <- retail %>%  # create unique identifier
+  mutate(InNo_Desc = paste(Invoice_Number, Product_Name, sep = ' ')) # filter out duplicates 
+retail <- retail[!duplicated(retail$InNo_Desc), ] %>% 
+  select(-InNo_Desc) # drop unique identifier
+
+# Create the rating matrix 
+ratings_matrix <- retail %>%# Select only needed variables
+  select(Invoice_Number, Product_Name) %>% # Add a column of 1s
+  mutate(value = 1) %>%# Spread into user-item format
+  spread(Product_Name, value, fill = 0) %>%
+  select(-Invoice_Number) %>%# Convert to matrix
+  as.matrix() %>%# Convert to recommenderlab class 'binaryRatingsMatrix'
+  as("binaryRatingMatrix")
+
+# Create evaluation scheme
+scheme <- ratings_matrix %>% 
+  evaluationScheme(method = "cross",
+                   k      = 5, 
+                   train  = 0.6,
+                   given  = -1)
+# Set up List of Algorithms
+algorithms <- list(
+  "association rules" = list(name  = "AR", param = list(supp = 0.01, conf = 0.70)))
+
+
+# create a made-up order with a string containing 6 products selected at random.
+customer_order <- c("Product 1",
+                    "Product 2","Product 3")
+
+
+# put string in a format that recommenderlab accepts.
+new_order_rat_matrx <- retail %>% 
+  select(Product_Name) %>% # Select item descriptions from retail dataset
+  unique() %>% 
+  mutate(value = as.numeric(Product_Name %in% customer_order)) %>% # Add a 'value' column
+  spread(key = Product_Name, value = value) %>% # Spread into sparse matrix format
+  as.matrix() %>% 
+  as("binaryRatingMatrix")
+
+
+as(new_order_rat_matrx,"matrix")
+
+# create a `Recommender`
+recomm <- Recommender(getData(scheme, 'train'), 
+                      method = "AR",   
+                      param = list(supp = 0.01, conf = 0.01))
+
+rule_base <- getModel(recomm)$rule_base
+
+# inspecting the Rule with RHS and LHS- confidence, support and lift
+rules_result <- inspect(subset(rule_base,subset= items %in% customer_order))
+write.csv(rules_result,"rules_result_100720.csv")
+getwd()
+
+# pass the `Recommender` and the made-up order to the `predict` function to create 
+# a top 10 recommendation list for the new customer.
+pred <- predict(recomm, 
+                newdata = new_order_rat_matrx, 
+                n       = 10)
+pred
+as(pred, "list")
+
+  
